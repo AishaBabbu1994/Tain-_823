@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memoria Caribeña 🌊</title>
+    <style>
+        :root { --turquesa: #00B4D8; --coral: #FF6B6B; --arena: #FFF9F0; --sol: #FFD166; }
+        body { background: var(--turquesa); font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .app { background: var(--arena); padding: 25px; border-radius: 16px; max-width: 500px; width: 100%; box-shadow: 0 10px 20px rgba(0,0,0,0.15); text-align: center; }
+        h1 { color: var(--coral); margin: 0 0 15px; font-size: 24px; }
+        input, textarea, button { width: 100%; padding: 12px; margin: 8px 0; border: 2px solid var(--turquesa); border-radius: 10px; font-size: 15px; box-sizing: border-box; }
+        textarea { resize: vertical; min-height: 120px; }
+        button { background: var(--coral); color: white; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #E55A5A; }
+        button:disabled { background: #A0A0A0; cursor: wait; }
+        .opcion { background: var(--sol); color: #333; border: 2px solid #E0C070; margin: 6px 0; }
+        .opcion:hover { background: #FFC107; }
+        .feedback { margin: 15px 0; font-size: 16px; min-height: 28px; font-weight: bold; padding: 10px; border-radius: 8px; }
+        .ok { background: #C8E6C9; color: #2E7D32; } 
+        .mal { background: #FFCDD2; color: #C62828; }
+        .info { background: #E3F2FD; color: #1565C0; font-size: 14px; }
+        .hidden { display: none; }
+        .progreso { background: #E0E0E0; border-radius: 10px; height: 12px; margin: 10px 0; overflow: hidden; }
+        .progreso-barra { background: var(--coral); height: 100%; transition: width 0.3s; }
+        .resultado { font-size: 20px; font-weight: bold; color: var(--coral); margin: 15px 0; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <h1>🌴 Memoria Caribeña 🌺</h1>
+    
+    <div id="pantalla-inicio">
+        <input type="password" id="api" placeholder="Clave GROQ (gsk_...)">
+        <textarea id="texto" placeholder="Pega aquí tu texto completo (puede ser largo)..."></textarea>
+        <button id="btn-start" onclick="iniciar()">Generar Preguntas ☀️</button>
+        <p id="aviso" class="feedback mal hidden"></p>
+    </div>
+
+    <div id="pantalla-quiz" class="hidden">
+        <div class="progreso"><div id="barra" class="progreso-barra" style="width: 0%"></div></div>
+        <p id="contador" style="font-size:14px; color:#666;"></p>
+        <p id="pregunta" style="font-size:17px; margin-bottom:15px; font-weight:bold;"></p>
+        <div id="botones-opciones"></div>
+        <p id="feedback" class="feedback info">Consultando... 🐚</p>
+        <button id="btn-next" class="hidden" onclick="siguiente()">Siguiente 🌊</button>
+    </div>
+
+    <div id="pantalla-final" class="hidden">
+        <p class="resultado" id="resultado-final"></p>
+        <p id="mensaje-final" style="font-size:16px;"></p>
+        <button onclick="location.reload()">Empezar de nuevo 🔄</button>
+    </div>
+</div>
+
+<script>
+    let preguntas = [];
+    let actual = 0;
+    let aciertos = 0;
+
+    function dividirTexto(texto, maxCaracteres = 800) {
+        const partes = [];
+        let inicio = 0;
+        while (inicio < texto.length) {
+            let fin = Math.min(inicio + maxCaracteres, texto.length);
+            if (fin < texto.length) {
+                const ultimoEspacio = texto.lastIndexOf(' ', fin);
+                if (ultimoEspacio > inicio) fin = ultimoEspacio;
+            }
+            partes.push(texto.substring(inicio, fin));
+            inicio = fin;
+        }
+        return partes;
+    }
+
+    async function generarPreguntasDeParte(api, textoParte) {
+        const prompt = `Texto: "${textoParte}". Genera entre 2 y 4 preguntas de selección múltiple que cubran la información esencial. Cada respuesta correcta debe ser UNA SOLA PALABRA clave. Devuelve SOLO JSON: {"preguntas":[{"pregunta":"...","opciones":["correcta","err1","err2","err3"],"respuesta":"palabra"}]}`;
+        
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${api}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "groq/compound", messages: [{ role: "user", content: prompt }], temperature: 0.7 })
+        });
+
+        if (res.status === 401) throw new Error("❌ Clave inválida");
+        if (!res.ok) throw new Error(`❌ Error ${res.status}`);
+        
+        const data = await res.json();
+        let raw = data.choices[0].message.content.trim().replace(/```json/g, "").replace(/```/g, "");
+        return JSON.parse(raw).preguntas || [];
+    }
+
+    async function iniciar() {
+        const api = document.getElementById('api').value.trim();
+        const texto = document.getElementById('texto').value.trim();
+        const aviso = document.getElementById('aviso');
+        aviso.classList.add('hidden');
+
+        if (!api || !api.startsWith('gsk_')) { mostrarError("⚠️ Clave inválida (debe empezar con gsk_)"); return; }
+        if (!texto || texto.length < 20) { mostrarError("⚠️ Pega un texto más largo"); return; }
+
+        document.getElementById('pantalla-inicio').classList.add('hidden');
+        document.getElementById('pantalla-quiz').classList.remove('hidden');
+        const feedbackEl = document.getElementById('feedback');
+        feedbackEl.innerText = "Procesando tu texto... 🐚";
+        feedbackEl.className = "feedback info";
+
+        try {
+            const partes = dividirTexto(texto);
+            feedbackEl.innerText = `Generando preguntas (${partes.length} partes)... 🌴`;
+            
+            for (let i = 0; i < partes.length; i++) {
+                feedbackEl.innerText = `Generando preguntas de la parte ${i + 1} de ${partes.length}... 🌊`;
+                const preguntasParte = await generarPreguntasDeParte(api, partes[i]);
+                preguntas = preguntas.concat(preguntasParte);
+            }
+            
+            if (preguntas.length === 0) throw new Error("❌ No se generaron preguntas");
+            
+            mostrarPreguntaActual();
+        } catch (e) {
+            feedbackEl.innerText = e.message;
+            feedbackEl.className = "feedback mal";
+            document.getElementById('btn-next').classList.remove('hidden');
+            document.getElementById('btn-next').innerText = "🔄 Reintentar";
+            document.getElementById('btn-next').onclick = () => location.reload();
+        }
+    }
+
+    function mostrarPreguntaActual() {
+        const p = preguntas[actual];
+        document.getElementById('pregunta').innerText = p.pregunta;
+        document.getElementById('contador').innerText = `Pregunta ${actual + 1} de ${preguntas.length}`;
+        document.getElementById('barra').style.width = `${(actual / preguntas.length) * 100}%`;
+        
+        const contenedor = document.getElementById('botones-opciones');
+        contenedor.innerHTML = "";
+        const feedbackEl = document.getElementById('feedback');
+        feedbackEl.innerText = "Elige la respuesta correcta 👇";
+        feedbackEl.className = "feedback info";
+        document.getElementById('btn-next').classList.add('hidden');
+
+        const mezcladas = [...p.opciones].sort(() => Math.random() - 0.5);
+        mezcladas.forEach(op => {
+            const btn = document.createElement('button');
+            btn.className = "opcion";
+            btn.innerText = op;
+            btn.onclick = () => verificar(op, p.respuesta, mezcladas);
+            contenedor.appendChild(btn);
+        });
+    }
+
+    function verificar(seleccion, correcta, todas) {
+        todas.forEach(b => b.disabled = true);
+        const fb = document.getElementById('feedback');
+        if (seleccion.toLowerCase() === correcta.toLowerCase()) {
+            fb.innerText = "¡Correcto! 🌟";
+            fb.className = "feedback ok";
+            aciertos++;
+        } else {
+            fb.innerText = `Era: "${correcta}" 🌸`;
+            fb.className = "feedback mal";
+        }
+        document.getElementById('btn-next').classList.remove('hidden');
+        document.getElementById('btn-next').innerText = actual < preguntas.length - 1 ? "Siguiente 🌊" : "Ver resultados 🏆";
+    }
+
+    function siguiente() {
+        actual++;
+        if (actual >= preguntas.length) {
+            mostrarResultados();
+        } else {
+            mostrarPreguntaActual();
+        }
+    }
+
+    function mostrarResultados() {
+        document.getElementById('pantalla-quiz').classList.add('hidden');
+        document.getElementById('pantalla-final').classList.remove('hidden');
+        const porcentaje = Math.round((aciertos / preguntas.length) * 100);
+        document.getElementById('resultado-final').innerText = `${aciertos} de ${preguntas.length} correctas (${porcentaje}%)`;
+        
+        let mensaje = "";
+        if (porcentaje >= 80) mensaje = "¡Excelente! Dominas el tema. 🌟🌴";
+        else if (porcentaje >= 60) mensaje = "¡Muy bien! Sigue practicando. 🌺";
+        else mensaje = "Buen intento. Repasa el texto y vuelve a intentarlo. 🌊";
+        document.getElementById('mensaje-final').innerText = mensaje;
+    }
+
+    function mostrarError(msg) {
+        const aviso = document.getElementById('aviso');
+        aviso.innerText = msg;
+        aviso.classList.remove('hidden');
+    }
+</script>
+</body>
+</html>
