@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memoria Caribeña 🌊</title>
+    <style>
+        :root {
+            --primario: #00B4D8;
+            --secundario: #FF6B6B;
+            --fondo: #FFF9F0;
+            --texto: #2b2b2b;
+            --exito: #2E7D32;
+            --error: #C62828;
+        }
+
+        body {
+            background-color: var(--primario);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            color: var(--texto);
+        }
+
+        .contenedor-principal {
+            background: var(--fondo);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 { color: var(--secundario); margin-top: 0; }
+        
+        input, textarea, button {
+            width: 100%;
+            padding: 14px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+            border-radius: 12px;
+            font-size: 16px;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, textarea:focus {
+            border-color: var(--primario);
+            outline: none;
+        }
+
+        textarea { min-height: 150px; resize: vertical; }
+
+        .btn-accion {
+            background-color: var(--secundario);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-accion:hover:not(:disabled) { background-color: #E55A5A; }
+        .btn-accion:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        .btn-opcion {
+            background-color: white;
+            border: 2px solid var(--primario);
+            color: var(--primario);
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .btn-opcion:hover:not(:disabled) {
+            background-color: var(--primario);
+            color: white;
+        }
+
+        .oculto { display: none; }
+        
+        .alerta {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-weight: 600;
+        }
+        .alerta-info { background-color: #E3F2FD; color: #1565C0; }
+        .alerta-error { background-color: #FFCDD2; color: var(--error); }
+        .alerta-exito { background-color: #C8E6C9; color: var(--exito); }
+
+        .progreso-contenedor {
+            background: #eee;
+            border-radius: 20px;
+            height: 10px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progreso-barra {
+            background: var(--primario);
+            height: 100%;
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+    </style>
+</head>
+<body>
+
+<main class="contenedor-principal">
+    <h1>🌴 Memoria Caribeña 🌺</h1>
+
+    <section id="vista-configuracion">
+        <p>Prepara tu mente para el desafío.</p>
+        <input type="password" id="input-api" placeholder="Ingresa tu clave de Groq (gsk_...)">
+        <textarea id="input-texto" placeholder="Pega el texto de estudio aquí..."></textarea>
+        <button id="btn-comenzar" class="btn-accion">Comenzar Aventura ⛵</button>
+        <div id="mensaje-sistema" class="alerta oculto"></div>
+    </section>
+
+    <section id="vista-juego" class="oculto">
+        <div class="progreso-contenedor">
+            <div id="barra-progreso" class="progreso-barra"></div>
+        </div>
+        <p id="indicador-pregunta" style="color: #666; font-size: 14px;"></p>
+        <h3 id="texto-pregunta" style="line-height: 1.4;"></h3>
+        
+        <div id="contenedor-opciones"></div>
+        
+        <div id="feedback-juego" class="alerta alerta-info">Analizando opciones... 🐚</div>
+        <button id="btn-siguiente" class="btn-accion oculto">Siguiente 🌊</button>
+    </section>
+
+    <section id="vista-resultados" class="oculto">
+        <h2>¡Viaje terminado! 🏖️</h2>
+        <h1 id="texto-puntaje" style="font-size: 48px; color: var(--primario);"></h1>
+        <p id="texto-evaluacion"></p>
+        <button class="btn-accion" onclick="location.reload()">Jugar de nuevo 🔄</button>
+    </section>
+</main>
+
+<script>
+    const Estado = {
+        preguntas: [],
+        indiceActual: 0,
+        aciertos: 0
+    };
+
+    const UI = {
+        vistas: {
+            configuracion: document.getElementById('vista-configuracion'),
+            juego: document.getElementById('vista-juego'),
+            resultados: document.getElementById('vista-resultados')
+        },
+        inputs: {
+            api: document.getElementById('input-api'),
+            texto: document.getElementById('input-texto')
+        },
+        botones: {
+            comenzar: document.getElementById('btn-comenzar'),
+            siguiente: document.getElementById('btn-siguiente')
+        },
+        display: {
+            mensaje: document.getElementById('mensaje-sistema'),
+            progreso: document.getElementById('barra-progreso'),
+            indicador: document.getElementById('indicador-pregunta'),
+            pregunta: document.getElementById('texto-pregunta'),
+            opciones: document.getElementById('contenedor-opciones'),
+            feedback: document.getElementById('feedback-juego'),
+            puntaje: document.getElementById('texto-puntaje'),
+            evaluacion: document.getElementById('texto-evaluacion')
+        }
+    };
+
+    async function obtenerPreguntasDeGroq(apiKey, texto) {
+        const textoCorto = texto.substring(0, 1000); 
+        const prompt = `Texto: "${textoCorto}". Genera 3 preguntas de selección múltiple de tipo "completar el espacio en blanco" sobre información esencial. La palabra omitida debe ser reemplazada por "___". Devuelve SOLO un JSON con esta estructura exacta: {"preguntas":[{"pregunta":"El sol sale por el ___.","opciones":["este","oeste","norte","sur"],"respuesta":"este"}]}`;
+        
+        try {
+            const respuesta = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { 
+                    "Authorization": `Bearer ${apiKey}`, 
+                    "Content-Type": "application/json" 
+                },
+                body: JSON.stringify({ 
+                    model: "llama-3.1-8b-instant",
+                    messages: [{ role: "user", content: prompt }], 
+                    temperature: 0.5 
+                })
+            });
+
+            if (!respuesta.ok) {
+                const errorData = await respuesta.json();
+                throw new Error(`Error de API: ${respuesta.status} - ${errorData.error?.message || 'Error desconocido'}`);
+            }
+            
+            const datos = await respuesta.json();
+            let textoCrudo = datos.choices[0].message.content.trim();
+            
+            textoCrudo = textoCrudo.replace(/```json/g, "").replace(/```/g, "").trim();
+            
+            const jsonMatch = textoCrudo.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error("La respuesta no contiene JSON válido");
+            
+            const parsed = JSON.parse(jsonMatch[0]);
+            
+            if (!parsed.preguntas || !Array.isArray(parsed.preguntas)) {
+                throw new Error("La respuesta no tiene la estructura correcta");
+            }
+            
+            const preguntasValidas = parsed.preguntas.filter(p => 
+                p.pregunta && 
+                Array.isArray(p.opciones) && 
+                p.opciones.length >= 2 && 
+                p.respuesta
+            );
+            
+            if (preguntasValidas.length === 0) {
+                throw new Error("No se generaron preguntas válidas");
+            }
+            
+            return preguntasValidas;
+            
+        } catch (error) {
+            console.error('Error detallado:', error);
+            throw new Error(`No pudimos conectar con Groq: ${error.message}`);
+        }
+    }
+
+    function mostrarMensaje(texto, tipo = 'error') {
+        UI.display.mensaje.textContent = texto;
+        UI.display.mensaje.className = `alerta alerta-${tipo}`;
+        UI.display.mensaje.classList.remove('oculto');
+    }
+
+    function mezclarArray(array) {
+        return array.sort(() => Math.random() - 0.5);
+    }
+
+    function renderizarPregunta() {
+        const preguntaActual = Estado.preguntas[Estado.indiceActual];
+        
+        UI.display.progreso.style.width = `${(Estado.indiceActual / Estado.preguntas.length) * 100}%`;
+        UI.display.indicador.textContent = `Pregunta ${Estado.indiceActual + 1} de ${Estado.preguntas.length}`;
+        UI.display.pregunta.textContent = preguntaActual.pregunta;
+        
+        UI.display.opciones.innerHTML = '';
+        UI.botones.siguiente.classList.add('oculto');
+        UI.display.feedback.className = 'alerta alerta-info';
+        UI.display.feedback.textContent = 'Selecciona la palabra que falta 👇';
+
+        const opcionesMezcladas = mezclarArray([...preguntaActual.opciones]);
+        
+        opcionesMezcladas.forEach(opcion => {
+            const boton = document.createElement('button');
+            boton.className = 'btn-opcion';
+            boton.textContent = opcion;
+            boton.onclick = () => evaluarRespuesta(boton, opcion, preguntaActual.respuesta);
+            UI.display.opciones.appendChild(boton);
+        });
+    }
+
+    function evaluarRespuesta(botonSeleccionado, opcionElegida, respuestaCorrecta) {
+        const botones = UI.display.opciones.querySelectorAll('.btn-opcion');
+        botones.forEach(btn => btn.disabled = true);
+
+        const esCorrecta = opcionElegida.toLowerCase() === respuestaCorrecta.toLowerCase();
+
+        if (esCorrecta) {
+            botonSeleccionado.style.backgroundColor = 'var(--exito)';
+            botonSeleccionado.style.color = 'white';
+            UI.display.feedback.className = 'alerta alerta-exito';
+            UI.display.feedback.textContent = '¡Excelente! Respuesta correcta. 🌟';
+            Estado.aciertos++;
+        } else {
+            botonSeleccionado.style.backgroundColor = 'var(--error)';
+            botonSeleccionado.style.color = 'white';
+            UI.display.feedback.className = 'alerta alerta-error';
+            UI.display.feedback.textContent = `Incorrecto. La palabra correcta era: "${respuestaCorrecta}" 🌸`;
+        }
+
+        UI.botones.siguiente.classList.remove('oculto');
+        UI.botones.siguiente.textContent = Estado.indiceActual < Estado.preguntas.length - 1 ? "Siguiente 🌊" : "Ver Resultados 🏆";
+    }
+
+    function mostrarResultados() {
+        UI.vistas.juego.classList.add('oculto');
+        UI.vistas.resultados.classList.remove('oculto');
+        
+        const porcentaje = Math.round((Estado.aciertos / Estado.preguntas.length) * 100);
+        UI.display.puntaje.textContent = `${porcentaje}%`;
+        
+        if (porcentaje >= 80) UI.display.evaluacion.textContent = "¡Dominas este tema como un experto! 🌴";
+        else if (porcentaje >= 50) UI.display.evaluacion.textContent = "Buen trabajo, pero aún puedes mejorar. 🐚";
+        else UI.display.evaluacion.textContent = "Sigue repasando, ¡la próxima vez lo harás mejor! ⛵";
+    }
+
+    UI.botones.comenzar.addEventListener('click', async () => {
+        const apiKey = UI.inputs.api.value.trim();
+        const texto = UI.inputs.texto.value.trim();
+
+        if (!apiKey.startsWith('gsk_')) return mostrarMensaje('Por favor ingresa una clave de Groq válida.');
+        if (texto.length < 50) return mostrarMensaje('El texto es muy corto para generar buenas preguntas.');
+
+        UI.botones.comenzar.disabled = true;
+        UI.botones.comenzar.textContent = 'Conectando con la IA... ⏳';
+        mostrarMensaje('Generando tu cuestionario...', 'info');
+
+        try {
+            Estado.preguntas = await obtenerPreguntasDeGroq(apiKey, texto);
+            
+            if (Estado.preguntas.length === 0) throw new Error("La IA no devolvió preguntas.");
+            
+            UI.vistas.configuracion.classList.add('oculto');
+            UI.vistas.juego.classList.remove('oculto');
+            renderizarPregunta();
+
+        } catch (error) {
+            mostrarMensaje(error.message);
+            UI.botones.comenzar.disabled = false;
+            UI.botones.comenzar.textContent = 'Reintentar ⛵';
+        }
+    });
+
+    UI.botones.siguiente.addEventListener('click', () => {
+        Estado.indiceActual++;
+        if (Estado.indiceActual >= Estado.preguntas.length) {
+            mostrarResultados();
+        } else {
+            renderizarPregunta();
+        }
+    });
+</script>
+</body>
+</html>
